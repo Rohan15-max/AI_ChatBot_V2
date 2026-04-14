@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DevMentor v2.0 // Architect Edition</title>
+    <style>
+        :root {
+            --bg: #0a0c10;
+            --panel: #111418;
+            --accent: #58a6ff;
+            --neon: #3fb950;
+            --text: #d1d7dd;
+            --border: #30363d;
+        }
+        body { 
+            background-color: var(--bg); 
+            color: var(--text); 
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        .container {
+            width: 95%;
+            max-width: 900px;
+            height: 85vh;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+        }
+        .header {
+            padding: 20px 25px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            background: var(--neon);
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+            box-shadow: 0 0 10px var(--neon);
+        }
+        #chat-box {
+            flex: 1;
+            padding: 25px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            background-image: radial-gradient(#1f242c 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+        .msg {
+            padding: 15px 20px;
+            border-radius: 12px;
+            max-width: 85%;
+            line-height: 1.6;
+            font-size: 15px;
+        }
+        .user { 
+            align-self: flex-end; 
+            background: #1f2937; 
+            border: 1px solid var(--accent);
+            color: var(--accent); 
+        }
+        .bot { 
+            align-self: flex-start; 
+            background: #161b22; 
+            border: 1px solid var(--border);
+            white-space: pre-wrap;
+        }
+        .input-area {
+            padding: 25px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: 15px;
+        }
+        input {
+            flex: 1;
+            background: #0d1117;
+            border: 1px solid var(--border);
+            color: white;
+            padding: 14px;
+            border-radius: 8px;
+            font-size: 15px;
+            transition: 0.2s;
+        }
+        input:focus { border-color: var(--accent); outline: none; }
+        button {
+            background: var(--accent);
+            color: #0d1117;
+            border: none;
+            padding: 0 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div><span class="status-dot"></span>DevMentor // Architect_v2.0</div>
+            <div style="font-size: 12px; color: #8b949e;">API STATUS: STABLE</div>
+        </div>
+        <div id="chat-box"></div>
+        <div class="input-area">
+            <input type="text" id="user-input" placeholder="Submit your query or code snippet...">
+            <button onclick="sendMessage()">Analyze</button>
+        </div>
+    </div>
+
+    <script>
+        async function sendMessage() {
+            const input = document.getElementById('user-input');
+            const box = document.getElementById('chat-box');
+            if(!input.value.trim()) return;
+
+            const text = input.value;
+            box.innerHTML += `<div class="msg user">${text}</div>`;
+            input.value = '';
+            box.scrollTop = box.scrollHeight;
+
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({message: text})
+                });
+                const data = await response.json();
+                box.innerHTML += `<div class="msg bot">${data.reply}</div>`;
+            } catch(e) {
+                box.innerHTML += `<div class="msg bot" style="color: #ff7b72;">Critical Error: Connection Interrupted.</div>`;
+            }
+            box.scrollTop = box.scrollHeight;
+        }
+        document.getElementById('user-input').addEventListener('keypress', (e) => {
+            if(e.key === 'Enter') sendMessage();
+        });
+    </script>
+</body>
+</html>
