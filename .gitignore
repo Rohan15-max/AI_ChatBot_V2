@@ -1,1 +1,3 @@
- GEMINI_API_KEY=AIzaSyBeaMcUJVTqSUr4woB0Qc3-M3cSFwHXAZo
+.env
+__pycache__/
+*.pyc
