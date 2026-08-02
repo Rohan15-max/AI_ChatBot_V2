@@ -1,0 +1,33 @@
+groups:
+- name: ai_platform_alerts
+  rules:
+  - alert: HighLatency
+    expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m])) > 2
+    for: 2m
+    annotations: { summary: "High 99th percentile latency" }
+
+  - alert: LLMProviderDown
+    expr: probe_success{job="openai"} == 0
+    for: 1m
+    annotations: { summary: "OpenAI API is unreachable" }
+
+  # FIX: added — model_router.py's fallback chain treats Gemini, OpenAI,
+  # and Anthropic as peer providers (gemini-flash -> gpt-4o-mini ->
+  # claude-haiku -> ...). The original rules only alerted on OpenAI going
+  # down; Gemini and Anthropic outages would have been silent, even though
+  # losing any one of them reduces the fallback chain's effective coverage,
+  # and losing more than one significantly raises the odds a user request
+  # hits the "all providers failed" path in app.py's chat() route.
+  - alert: GeminiProviderDown
+    expr: probe_success{job="gemini"} == 0
+    for: 1m
+    annotations: { summary: "Gemini API is unreachable" }
+
+  - alert: AnthropicProviderDown
+    expr: probe_success{job="anthropic"} == 0
+    for: 1m
+    annotations: { summary: "Anthropic API is unreachable" }
+
+  - alert: HighErrorRate
+    expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+    annotations: { summary: "Error rate above 5%" }

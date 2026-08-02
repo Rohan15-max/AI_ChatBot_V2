@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # FIX: this job-level `env` block did not previously exist. config.py's
+    # Settings class requires app_secret, jwt_secret, postgres_user, and
+    # postgres_password with NO defaults — constructing Settings() (which
+    # happens at module import time, via `settings = get_settings()` near
+    # the top of app.py) raises a pydantic ValidationError immediately if
+    # any of these are missing. The previous workflow only set
+    # POSTGRES_PASSWORD for the postgres *service container* and
+    # OPENAI_API_KEY for the test step — nothing else the app needs to boot
+    # was ever exposed to the test step's own process environment, so
+    # `pytest tests/ -v` would fail at collection time (before any test body
+    # even ran) the moment it tried to `import app`.
+    #
+    # APP_ENV=testing also matters: config.py's _validate_critical_settings
+    # only enforces the strict 32-char-minimum / no-weak-words checks on
+    # app_secret/jwt_secret when is_production is True. Leaving APP_ENV
+    # unset would default to "development", which works too, but "testing"
+    # is the more accurate signal for what this job actually is.
+    env:
+      APP_ENV: testing
+      DEBUG: "false"
+      APP_SECRET: ci-test-secret-not-for-production-use-only
+      JWT_SECRET: ci-test-jwt-secret-not-for-production-use-only
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: testpass
+      POSTGRES_DB: postgres
+      REDIS_URL: redis://localhost:6379/0
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: testpass
+        ports:
+          # FIX: added explicit port mapping. Without this, the postgres
+          # service container's 5432 is reachable to other *containers* on
+          # the same Docker network, but not to the job's own runner
+          # process (where pytest actually executes) at localhost:5432 —
+          # GitHub Actions service containers need ports published to be
+          # reachable from the runner itself.
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --timeout 5s
+          --retries 5
+      redis:
+        image: redis:7
+        ports:
+          # Same fix as postgres above — published port so the runner
+          # process can reach it at localhost:6379.
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install pytest black mypy bandit
+    - name: Lint with black
+      run: black --check .
+    - name: Type check with mypy
+      run: mypy .
+    - name: Security scan with bandit
+      run: bandit -r . -ll
+    - name: Test with pytest
+      env:
+        # FIX: at least one LLM provider key must be present, or
+        # config.py's _validate_critical_settings raises
+        # "No LLM provider configured" before Settings() finishes
+        # constructing. Using a placeholder value is fine for CI — nothing
+        # in a typical unit-test run should be making a real network call
+        # to Gemini/OpenAI/Anthropic; if your tests for model_router.py
+        # genuinely need to hit a real API, mock the HTTP layer instead of
+        # relying on a real secret being present in CI.
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-ci-placeholder-not-real' }}
+      run: pytest tests/ -v

@@ -1,0 +1,87 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'ai_platform'
+    static_configs:
+      # FIX: was app:8000. The Dockerfile's gunicorn binds to 0.0.0.0:5000
+      # (EXPOSE 5000, CMD --bind 0.0.0.0:5000) — every other compose/k8s
+      # file in this project was fixed to the same port, this one was
+      # missed. Prometheus would have silently scraped nothing, ever,
+      # against a port no process listens on — /metrics being unreachable
+      # wouldn't even show up as an obvious error, just empty dashboards.
+      - targets: ['app:5000']
+    metrics_path: '/metrics'
+
+  # ── LLM provider availability probes ────────────────────────────────
+  # FIX: alert_rules.yml's LLMProviderDown / GeminiProviderDown /
+  # AnthropicProviderDown alerts all reference probe_success{job="..."}
+  # for jobs named "openai", "gemini", "anthropic" — but this file never
+  # defined ANY of those scrape jobs. All three alerts were dead on
+  # arrival: not failing to fire because providers were healthy, but
+  # because Prometheus never produced the probe_success metric at all for
+  # any of those job names. This requires the blackbox_exporter
+  # (https://github.com/prometheus/blackbox_exporter) running as its own
+  # service — add it to docker-compose.prod.yml alongside prometheus and
+  # grafana if it isn't there yet, listening on its default port 9115.
+  #
+  # HONEST LIMITATION: there is no Gemini-API-specific public status
+  # endpoint the way OpenAI and Anthropic each run a status.<provider>.com
+  # page. The Gemini probe below targets Google Cloud's general status
+  # dashtoard as a best-effort proxy — it can show a false "healthy" if
+  # the generativelanguage.googleapis.com endpoint specifically is
+  # degraded while the rest of Google Cloud is fine. A tighter check would
+  # probe the real Gemini API endpoint directly, but that requires
+  # authenticating with a real API key on every probe, which costs money
+  # per check and risks counting against your own rate limits — a
+  # deliberate tradeoff, not an oversight.
+  - job_name: 'openai'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - https://status.openai.com/
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox_exporter:9115
+
+  - job_name: 'anthropic'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - https://status.anthropic.com/
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox_exporter:9115
+
+  - job_name: 'gemini'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      # See HONEST LIMITATION note above — this is Google Cloud's general
+      # status page, not a Gemini-API-specific endpoint.
+      - targets:
+          - https://status.cloud.google.com/
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox_exporter:9115
+
+  - job_name: 'blackbox_exporter'
+    static_configs:
+      - targets: ['blackbox_exporter:9115']

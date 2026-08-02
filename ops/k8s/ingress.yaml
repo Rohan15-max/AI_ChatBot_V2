@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ai-chatbot-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+spec:
+  tls:
+  - hosts: [ ai.yourdomain.com ]
+    secretName: ai-tls
+  rules:
+  - host: ai.yourdomain.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ai-chatbot
+            # FIX: was 8000. The Service this Ingress routes to forwards
+            # traffic to the Deployment's containerPort, which is 5000
+            # (matching the Dockerfile's actual gunicorn bind). Routing to
+            # 8000 here would mean every request hits a port nothing is
+            # listening on, the same root issue fixed in deployment.yaml.
+            port: { number: 5000 }

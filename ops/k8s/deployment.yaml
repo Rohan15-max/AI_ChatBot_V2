@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-chatbot
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ai-chatbot
+  template:
+    metadata:
+      labels:
+        app: ai-chatbot
+    spec:
+      containers:
+      - name: app
+        image: your-registry/ai-chatbot:latest
+        ports:
+        # FIX: same bug as the other deployment.yaml in this project — the
+        # Dockerfile's gunicorn binds to 0.0.0.0:5000 (EXPOSE 5000, CMD
+        # --bind 0.0.0.0:5000), not 8000. This is also the file
+        # ops/k8s/ingress.yaml and ops/k8s/hpa.yaml's sibling — ingress.yaml
+        # had the same port mismatch, fixed separately.
+        - containerPort: 5000
+        envFrom:
+        - secretRef:
+            name: app-secrets
+        resources:
+          requests: { memory: "512Mi", cpu: "250m" }
+          limits: { memory: "1Gi", cpu: "500m" }
+        livenessProbe:
+          # FIX: port updated to match containerPort above (5000).
+          httpGet: { path: /health, port: 5000 }
+          initialDelaySeconds: 30
+        readinessProbe:
+          # FIX: /ready doesn't exist anywhere in the app. monitoring.py
+          # registers /health, /health/liveness, /health/readiness, and
+          # /health/detailed — /health/readiness specifically checks DB
+          # connectivity before returning 200, which is the correct check
+          # for readiness (vs. liveness, which only confirms the process is
+          # alive). Port updated to 5000 to match.
+          httpGet: { path: /health/readiness, port: 5000 }
+          initialDelaySeconds: 15
+          periodSeconds: 10

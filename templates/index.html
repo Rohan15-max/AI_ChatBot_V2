@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="DevMentor AI — The General Purpose AI for Everyday Tasks">
+    <title>DevMentor AI</title>
+
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.5/purify.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:ital@1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='design-system.css') }}">
+</head>
+
+<body data-theme="dark">
+
+<div class="toast-wrap" id="toast-wrap" aria-live="polite"></div>
+
+<div id="rag-badge" aria-label="Chat mode"><i class="fa-solid fa-message"></i> <span>Chat</span></div>
+
+<!-- ══════════════ AUTH OVERLAY ══════════════════════════════ -->
+<div id="auth-overlay" role="dialog" aria-modal="true" aria-label="Sign in"
+     style="{% if logged_in %}display:none{% endif %}">
+  <div class="auth-card">
+    <div class="auth-mark" aria-hidden="true"><i class="fa-solid fa-code"></i></div>
+    <div class="auth-title">Sign in to DevMentor</div>
+    <div class="auth-sub">Your general purpose AI for everyday tasks</div>
+    <div id="auth-err" class="auth-error" role="alert"></div>
+
+    <div class="auth-field">
+      <label for="auth-user">Username</label>
+      <input class="auth-input" type="text" id="auth-user" autocomplete="username" spellcheck="false" placeholder="your username">
+    </div>
+    <div class="auth-field">
+      <label for="auth-pass">Password</label>
+      <input class="auth-input" type="password" id="auth-pass" autocomplete="current-password" placeholder="your password">
+    </div>
+
+    <button class="auth-btn" id="login-btn" onclick="doAuth('login')">Sign in</button>
+    <button class="auth-btn-sec" onclick="doAuth('register')">Create an account</button>
+    <div class="auth-div">or</div>
+
+    <div id="g_id_onload"
+         data-client_id="{{ google_client_id }}"
+         data-context="signin" data-ux_mode="popup"
+         data-callback="handleGoogleSignIn" data-auto_prompt="false"></div>
+    <div class="g_id_signin" data-type="standard" data-shape="rectangular"
+         data-theme="outline" data-text="signin_with"
+         data-size="large" data-logo_alignment="left" data-width="328"></div>
+  </div>
+</div>
+
+<!-- ══════════════ RENAME MODAL ══════════════════════════════ -->
+<div class="modal-ov" id="rename-modal" role="dialog" aria-modal="true">
+  <div class="modal">
+    <h3><i class="fa-solid fa-pen"></i> Rename conversation</h3>
+    <input class="modal-in" type="text" id="rename-in" placeholder="New title…" maxlength="80"
+           onkeydown="if(event.key==='Enter')confirmRename()">
+    <div class="modal-acts">
+      <button class="mbtn cancel" onclick="closeModal('rename-modal')">Cancel</button>
+      <button class="mbtn ok"     onclick="confirmRename()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ PROFILE MODAL ════════════════════════════ -->
+<div class="modal-ov" id="profile-modal" role="dialog" aria-modal="true">
+  <div class="modal">
+    <h3><i class="fa-solid fa-circle-user"></i> Your profile</h3>
+    <img id="pm-av" class="pm-av" src="" alt="Profile">
+    <div class="pm-name"  id="pm-name">—</div>
+    <div class="pm-email" id="pm-email">—</div>
+    <div class="pm-stats">
+      <div class="pm-stat"><div class="pm-val" id="ps-threads">0</div><div class="pm-lbl">Chats</div></div>
+      <div class="pm-stat"><div class="pm-val" id="ps-msgs">0</div><div class="pm-lbl">Messages</div></div>
+      <div class="pm-stat"><div class="pm-val" id="ps-ups">0</div><div class="pm-lbl">Uploads</div></div>
+    </div>
+    <div class="modal-acts">
+      <button class="mbtn cancel" onclick="closeModal('profile-modal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<button id="sb-toggle" onclick="toggleSB()" aria-label="Toggle sidebar">
+  <i class="fa-solid fa-chevron-left" id="sb-icon"></i>
+</button>
+
+<!-- ══════════════ SIDEBAR ══════════════════════════════════ -->
+<aside class="sidebar" id="sidebar" aria-label="Navigation">
+
+  <div class="sb-logo">
+    <div class="sb-mark" aria-hidden="true"><i class="fa-solid fa-code"></i></div>
+    <div class="sb-brand">DevMentor<small>General purpose AI</small></div>
+  </div>
+
+  <div class="profile-card" id="profile-card" onclick="openProfileModal()"
+       role="button" tabindex="0" aria-label="View profile"
+       onkeydown="if(event.key==='Enter')openProfileModal()">
+    <img id="p-av" class="p-avatar" src="" alt="Avatar">
+    <div class="p-info">
+      <div class="p-name" id="p-name">Guest</div>
+      <div class="p-email" id="p-email"></div>
+    </div>
+  </div>
+
+  <div class="search-row" role="search">
+    <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+    <input type="text" id="search-in" placeholder="Search messages…" autocomplete="off"
+           aria-label="Search messages" oninput="onSearch(this.value)"
+           onkeydown="if(event.key==='Escape')clearSearch()">
+    <button id="search-x" style="display:none;color:var(--text-faint);font-size:11px"
+            onclick="clearSearch()" aria-label="Clear search">✕</button>
+  </div>
+  <div id="search-panel" role="listbox" aria-label="Search results"></div>
+
+  <div class="mode-row" role="group" aria-label="Chat mode">
+    <button class="mode-btn active" id="btn-std" onclick="setMode('standard')" aria-pressed="true">
+      <i class="fa-solid fa-message"></i> Chat
+    </button>
+    <button class="mode-btn" id="btn-rag" onclick="setMode('rag')" aria-pressed="false">
+      <i class="fa-solid fa-database"></i> Knowledge base
+    </button>
+  </div>
+
+  <div class="rag-panel">
+    <div class="rag-ph">
+      <span>Knowledge base</span>
+      <span class="rag-count" id="rag-count">…</span>
+    </div>
+    <div class="rag-drop" id="rag-drop"
+         onclick="document.getElementById('rag-in').click()"
+         ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)"
+         tabindex="0" role="button" aria-label="Upload files"
+         onkeydown="if(event.key==='Enter')document.getElementById('rag-in').click()">
+      <i class="fa-solid fa-cloud-arrow-up"></i>
+      <span>Drop files or click to upload</span>
+    </div>
+    <input type="file" id="rag-in" style="display:none" multiple
+           accept=".txt,.pdf,.md,.docx,.py,.js,.ts,.html,.css,.json,.yaml,.yml,.csv"
+           onchange="uploadRAG(this)">
+    <div class="rag-files" id="rag-files"></div>
+    <button class="rag-clear" onclick="clearRAG()">
+      <i class="fa-solid fa-trash"></i> Clear knowledge base
+    </button>
+  </div>
+
+  <button class="new-btn" onclick="newSession()" aria-label="New conversation">
+    <i class="fa-solid fa-plus"></i> New conversation
+  </button>
+
+  <div class="hist-lbl">Recent</div>
+  <nav class="hist-list" id="hist-list" aria-label="Chat history"></nav>
+
+  <div class="theme-sec">
+    <div class="theme-lbl">Appearance</div>
+    <div class="theme-grid" role="group" aria-label="Theme">
+      <button class="theme-chip active" data-theme="dark" onclick="setTheme('dark')">
+        <i class="fa-solid fa-moon"></i> Dark
+      </button>
+      <button class="theme-chip" data-theme="light" onclick="setTheme('light')">
+        <i class="fa-solid fa-sun"></i> Light
+      </button>
+    </div>
+  </div>
+
+  <button class="logout-btn" onclick="doLogout()">
+    <i class="fa-solid fa-arrow-right-from-bracket"></i> Sign out
+  </button>
+
+</aside>
+
+<!-- ══════════════ MAIN ══════════════════════════════════════ -->
+<main class="main" role="main">
+
+  <header class="topbar">
+    <div class="topbar-l">
+      <span class="topbar-mode" id="mode-lbl">Chat</span>
+      <span class="topbar-sub" id="model-lbl">·  multi-model routing</span>
+    </div>
+    <div class="topbar-r">
+      <button class="icon-btn" id="ground-btn" onclick="toggleGrounding()"
+              aria-label="Toggle web search grounding" title="Use web search for this conversation">
+        <i class="fa-solid fa-globe"></i>
+      </button>
+      <button class="icon-btn" id="mute-btn" onclick="toggleMute()"
+              aria-label="Toggle voice output" title="Read responses aloud">
+        <i class="fa-solid fa-volume-high"></i>
+      </button>
+    </div>
+  </header>
+
+  <div class="stats-bar" id="stats-bar">
+    <div class="stat-item"><i class="fa-solid fa-comments"></i><span id="sb-threads">0 chats</span></div>
+    <div class="stat-item"><i class="fa-solid fa-message"></i><span id="sb-msgs">0 messages</span></div>
+    <div class="stat-item"><i class="fa-solid fa-file"></i><span id="sb-ups">0 uploads</span></div>
+  </div>
+
+  <div id="chat-box" role="log" aria-live="polite" aria-label="Chat messages">
+    <div class="msg bot">
+      <div class="mc-wrap"><div class="mc">
+        <p><strong>Welcome to DevMentor.</strong> Ask me anything — from code and technical questions to writing, research, planning, or everyday things.</p>
+        <p>Switch to <strong>Knowledge base</strong> mode and upload documents to ask questions grounded in your own files.</p>
+      </div></div>
+    </div>
+  </div>
+
+  <div id="thinking-rule"></div>
+  <div id="thinking-label"></div>
+
+  <div class="input-area">
+    <div id="file-prev">
+      <i class="fa-solid fa-paperclip"></i>
+      <span id="file-name-lbl"></span>
+      <button class="rm" onclick="clearFile()" aria-label="Remove file">✕</button>
+    </div>
+    <div class="input-wrap" role="group" aria-label="Message input">
+      <input type="file" id="file-in" style="display:none"
+             onchange="handleFile(this)"
+             accept=".pdf,.txt,.docx,.md,.py,.js,.ts,.html,.css,.json,.yaml,.yml,.csv">
+      <button class="ib" onclick="document.getElementById('file-in').click()" title="Attach file" aria-label="Attach file">
+        <i class="fa-solid fa-paperclip"></i>
+      </button>
+      <button class="ib" id="voice-btn" onclick="toggleVoice()" title="Voice input" aria-label="Voice input">
+        <i class="fa-solid fa-microphone"></i>
+      </button>
+      <textarea id="user-input" rows="1"
+                placeholder="Message DevMentor…"
+                aria-label="Type your message"
+                onkeydown="onInputKey(event)"
+                oninput="autoResize(this)"></textarea>
+      <button id="send-btn" onclick="sendMessage()" aria-label="Send message">
+        Send <i class="fa-solid fa-arrow-up"></i>
+      </button>
+      <button id="stop-btn" onclick="stopGeneration()" aria-label="Stop generating" style="display:none">
+        <i class="fa-solid fa-stop"></i> Stop
+      </button>
+    </div>
+    <div class="input-hints">
+      <span>Enter to send · Shift+Enter for new line</span>
+      <span id="char-lbl"></span>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <span>DevMentor AI</span>
+    <span id="footer-ver">v1.0.0</span>
+  </footer>
+
+</main>
+
+<script>
+"use strict";
+
+const GOOGLE_CLIENT_ID = "{{ google_client_id }}";
+const APP_VER = "{{ app_version }}";
+document.getElementById("footer-ver").textContent = "v" + APP_VER;
+
+/* ── STATE ──────────────────────────────────────────────── */
+let threadId       = null;
+let chatMode       = "standard";
+let busy           = false;
+let attachedFile   = null;
+let isMuted        = true;
+let useGrounding   = false;
+let renameId       = null;
+let searchTimer    = null;
+let accessToken    = localStorage.getItem("dm-access-token") || null;
+let refreshToken   = localStorage.getItem("dm-refresh-token") || null;
+let lastUserMessage = null;
+let lastRequestMode  = null;
+
+let socket = null;
+let socketReady = false;
+let activeStreamId = null;
+let streamingMsgEl = null;
+let streamingMcEl = null;
+let streamingTextBuffer = "";
+
+/* ── MARKED + DOMPURIFY ──────────────────────────────────── */
+marked.setOptions({ breaks: true, gfm: true });
+const R = new marked.Renderer();
+R.link = (href, title, text) =>
+  `<a href="${sAttr(safeUrl(href))}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+marked.use({ renderer: R });
+
+function md(text) {
+  const raw = marked.parse(text || "");
+  return DOMPurify.sanitize(raw, {
+    ALLOWED_TAGS: ["p","br","strong","em","u","s","del","code","pre","blockquote",
+                   "ul","ol","li","h1","h2","h3","h4","h5","h6",
+                   "table","thead","tbody","tr","th","td","a","hr","span","div","img"],
+    ALLOWED_ATTR: ["href","src","alt","title","class","target","rel"],
+    FORBID_TAGS: ["script","style","iframe","form","input","button"],
+    FORCE_BODY: true,
+  });
+}
+
+/* ── UTILS ──────────────────────────────────────────────── */
+function esc(s){ if(!s)return""; const d=document.createElement("div"); d.textContent=s; return d.innerHTML; }
+function sAttr(s){ if(!s)return"#"; if(/^javascript:/i.test(s.trim()))return"#"; return s.replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+function safeUrl(u){ try{ const x=new URL(u); if(x.protocol==="https:"||x.protocol==="http:")return u; }catch(_){} return"#"; }
+function autoResize(el){ el.style.height="auto"; el.style.height=Math.min(el.scrollHeight,200)+"px"; document.getElementById("char-lbl").textContent=el.value.length?`${el.value.length} characters`:""; }
+
+/* ── TOASTS ─────────────────────────────────────────────── */
+const ICONS={success:"check",error:"triangle-exclamation",info:"circle-info",warning:"exclamation"};
+function toast(msg,type="info",ms=3400){
+  const c=document.getElementById("toast-wrap"),t=document.createElement("div");
+  t.className=`toast ${type}`;t.setAttribute("role","status");
+  t.innerHTML=`<i class="fa-solid fa-${ICONS[type]||"circle-info"}"></i> ${esc(msg)}`;
+  c.appendChild(t);
+  setTimeout(()=>{ t.classList.add("out"); setTimeout(()=>t.remove(),200); },ms);
+}
+
+function humanizeError(msg, code){
+  if(!msg || /internal server error/i.test(msg) || code==="INTERNAL_ERROR"){
+    return "Something went wrong on our end. We're looking into it — please try again in a moment.";
+  }
+  return msg;
+}
+
+/* ── MODALS ─────────────────────────────────────────────── */
+function openModal(id){ document.getElementById(id).classList.add("open"); }
+function closeModal(id){ document.getElementById(id).classList.remove("open"); }
+document.querySelectorAll(".modal-ov").forEach(el=>el.addEventListener("click",e=>{ if(e.target===el)el.classList.remove("open"); }));
+document.addEventListener("keydown",e=>{ if(e.key==="Escape") document.querySelectorAll(".modal-ov.open").forEach(m=>m.classList.remove("open")); });
+
+/* ── THEME ──────────────────────────────────────────────── */
+function setTheme(n){
+  document.body.setAttribute("data-theme",n);
+  localStorage.setItem("dm-theme",n);
+  document.querySelectorAll(".theme-chip").forEach(c=>c.classList.toggle("active",c.dataset.theme===n));
+}
+
+/* ── SIDEBAR ─────────────────────────────────────────────── */
+function toggleSB(){
+  const s=document.getElementById("sidebar"),i=document.getElementById("sb-icon");
+  s.classList.toggle("collapsed");
+  document.body.classList.toggle("sb-col");
+  i.className=s.classList.contains("collapsed")?"fa-solid fa-chevron-right":"fa-solid fa-chevron-left";
+}
+
+/* ── CHAT MODE ──────────────────────────────────────────── */
+function setMode(m){
+  chatMode=m; const r=m==="rag";
+  document.getElementById("btn-std").classList.toggle("active",!r);
+  document.getElementById("btn-rag").classList.toggle("active",r);
+  document.getElementById("btn-std").setAttribute("aria-pressed",String(!r));
+  document.getElementById("btn-rag").setAttribute("aria-pressed",String(r));
+  const b=document.getElementById("rag-badge");
+  b.className=r?"rag":"";
+  b.innerHTML=r?'<i class="fa-solid fa-database"></i> <span>Knowledge base</span>':'<i class="fa-solid fa-message"></i> <span>Chat</span>';
+  document.getElementById("mode-lbl").textContent=r?"Knowledge base":"Chat";
+  document.getElementById("model-lbl").textContent=r?"·  grounded in your documents":"·  multi-model routing";
+}
+
+function toggleGrounding(){
+  useGrounding=!useGrounding;
+  document.getElementById("ground-btn").classList.toggle("active",useGrounding);
+  toast(useGrounding?"Web search enabled for this chat":"Web search disabled","info",1800);
+}
+
+/* ── MUTE ───────────────────────────────────────────────── */
+function toggleMute(){
+  isMuted=!isMuted;
+  const b=document.getElementById("mute-btn");
+  b.innerHTML=isMuted?'<i class="fa-solid fa-volume-xmark"></i>':'<i class="fa-solid fa-volume-high"></i>';
+  b.classList.toggle("active",!isMuted);
+  if(isMuted)window.speechSynthesis?.cancel();
+  localStorage.setItem("dm-muted",isMuted?"1":"0");
+}
+
+/* ── SPEECH ─────────────────────────────────────────────── */
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+let recog=null;
+if(SR){
+  recog=new SR(); recog.continuous=false; recog.lang="en-US";
+  recog.onresult=e=>{ const inp=document.getElementById("user-input"); inp.value=e.results[0][0].transcript; autoResize(inp); document.getElementById("voice-btn").classList.remove("mic-on"); sendMessage(); };
+  recog.onerror=()=>{ document.getElementById("voice-btn").classList.remove("mic-on"); toast("Voice input failed","error"); };
+  recog.onend=()=>document.getElementById("voice-btn").classList.remove("mic-on");
+}
+function toggleVoice(){
+  if(!recog)return toast("Speech recognition isn't supported in this browser","error");
+  const b=document.getElementById("voice-btn");
+  if(b.classList.contains("mic-on")){ recog.stop(); b.classList.remove("mic-on"); }
+  else{ b.classList.add("mic-on"); recog.start(); }
+}
+function speak(text){
+  if(isMuted)return;
+  try{
+    window.speechSynthesis.cancel();
+    const clean=text.replace(/```[\s\S]*?```/g,"code block").replace(/[*#_>`~\[\]]/g,"").substring(0,5000);
+    const u=new SpeechSynthesisUtterance(clean);
+    u.rate=1.0;
+    window.speechSynthesis.speak(u);
+  }catch(_){}
+}
+
+/* ── API HELPER ─────────────────────────────────────────── */
+const API_BASE = "/api/v1";
+
+async function api(path, opts={}){
+  const headers = { ...(opts.headers||{}) };
+  if(accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+  let r = await fetch(API_BASE + path, { ...opts, headers });
+
+  if(r.status===401 && refreshToken && !opts._retried){
+    const refreshed = await tryRefreshToken();
+    if(refreshed){
+      return api(path, { ...opts, _retried:true });
+    }
+  }
+
+  const j = await r.json().catch(()=>({}));
+  return { ok:r.ok, status:r.status, httpStatus:r.status, ...j };
+}
+
+async function tryRefreshToken(){
+  try{
+    const r = await fetch(API_BASE+"/auth/refresh", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ refresh_token: refreshToken }),
+    });
+    const j = await r.json().catch(()=>({}));
+    if(r.ok && j.data && j.data.access_token){
+      accessToken = j.data.access_token;
+      localStorage.setItem("dm-access-token", accessToken);
+      return true;
+    }
+  }catch(_){}
+  clearAuthTokens();
+  document.getElementById("auth-overlay").classList.remove("hidden");
+  return false;
+}
+
+function storeAuthTokens(data){
+  accessToken = data.access_token;
+  refreshToken = data.refresh_token;
+  if(accessToken) localStorage.setItem("dm-access-token", accessToken);
+  if(refreshToken) localStorage.setItem("dm-refresh-token", refreshToken);
+}
+function clearAuthTokens(){
+  accessToken = null; refreshToken = null;
+  localStorage.removeItem("dm-access-token");
+  localStorage.removeItem("dm-refresh-token");
+}
+
+/* ── AVATAR HELPER ──────────────────────────────────────── */
+function setAvatar(el,pic,name){
+  if(pic){ el.src=pic; return; }
+  const L=(name||"G").charAt(0).toUpperCase();
+  const accentHex = getComputedStyle(document.body).getPropertyValue('--accent').trim() || "#5B7FFF";
+  const svg=`<svg width="64" height="64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="${accentHex}" rx="32"/><text x="32" y="43" font-family="Inter,sans-serif" font-size="26" fill="#fff" text-anchor="middle" font-weight="700">${L}</text></svg>`;
+  el.src=`data:image/svg+xml;base64,${btoa(svg)}`;
+}
+
+/* ── PROFILE ────────────────────────────────────────────── */
+async function loadProfile(){
+  try{
+    const r=await api("/profile"); if(!r.ok)return;
+    const p=r.data; const n=p.display_name||p.username||"Guest";
+    document.getElementById("p-name").textContent=n;
+    document.getElementById("p-email").textContent=p.email||"";
+    setAvatar(document.getElementById("p-av"),p.picture,n);
+    document.getElementById("profile-card").style.display="flex";
+  }catch(_){}
+}
+async function openProfileModal(){
+  openModal("profile-modal");
+  try{
+    const[pr,sr]=await Promise.all([api("/profile"),api("/stats")]);
+    if(pr.ok){ const p=pr.data; document.getElementById("pm-name").textContent=p.display_name||p.username||"—"; document.getElementById("pm-email").textContent=p.email||"—"; setAvatar(document.getElementById("pm-av"),p.picture,p.display_name||p.username); }
+    if(sr.ok){ const s=sr.data; document.getElementById("ps-threads").textContent=s.total_threads||0; document.getElementById("ps-msgs").textContent=s.total_messages||0; document.getElementById("ps-ups").textContent=s.total_uploads||0; }
+  }catch(_){}
+}
+
+/* ── STATS BAR ──────────────────────────────────────────── */
+async function loadStats(){
+  try{
+    const r=await api("/stats"); if(!r.ok)return;
+    const s=r.data;
+    document.getElementById("sb-threads").textContent=`${s.total_threads||0} chats`;
+    document.getElementById("sb-msgs").textContent=`${s.total_messages||0} messages`;
+    document.getElementById("sb-ups").textContent=`${s.total_uploads||0} uploads`;
+    document.getElementById("stats-bar").classList.add("on");
+  }catch(_){}
+}
+
+/* ── RAG STATUS ─────────────────────────────────────────── */
+async function loadRAGStatus(){
+  try{
+    const r=await api("/rag/status"); if(!r.ok)throw new Error();
+    const d=r.data, el=document.getElementById("rag-count");
+    el.textContent=d.ready?`${d.file_count} file${d.file_count!==1?"s":""}`:"empty";
+    const fl=document.getElementById("rag-files");
+    if(d.files&&d.files.length){ fl.innerHTML=d.files.map(f=>`<div class="rag-file"><i class="fa-solid fa-circle-check"></i><span title="${sAttr(f.name)}">${esc(f.name)}</span></div>`).join(""); }
+    else{ fl.innerHTML=""; }
+  }catch(_){ document.getElementById("rag-count").textContent="—"; }
+}
+
+/* ── THREADS ────────────────────────────────────────────── */
+async function loadThreads(){
+  try{
+    const r=await api("/threads"); if(!r.ok)return;
+    renderThreads(r.data.threads||[]);
+  }catch(_){}
+}
+
+function renderThreads(threads){
+  const l=document.getElementById("hist-list"); l.innerHTML="";
+  if(!threads.length){ l.innerHTML=`<div style="font-size:12px;color:var(--text-faint);padding:12px;text-align:center">No conversations yet</div>`; return; }
+  threads.forEach(t=>{
+    const el=document.createElement("div");
+    el.className=`th-item${t.id===threadId?" active":""}`;
+    el.dataset.tid=t.id;
+    el.setAttribute("role","button"); el.setAttribute("tabindex","0");
+    el.setAttribute("aria-label",`Open: ${t.title}`);
+    el.innerHTML=`
+      <i class="fa-solid fa-${t.mode==="rag"?"database":"message"}" style="font-size:11px;flex-shrink:0;color:var(--text-faint)"></i>
+      <span class="th-title">${esc(t.title)}</span>
+      <span class="th-mode">${t.mode}</span>
+      <div class="th-acts">
+        <button class="th-act" title="Rename" onclick="event.stopPropagation();startRename('${t.id}','${sAttr(t.title)}')"><i class="fa-solid fa-pen"></i></button>
+        <button class="th-act" title="Export" onclick="event.stopPropagation();exportThread('${t.id}','${sAttr(t.title)}')"><i class="fa-solid fa-download"></i></button>
+        <button class="th-act del" title="Delete" onclick="event.stopPropagation();delThread('${t.id}')"><i class="fa-solid fa-trash"></i></button>
+      </div>`;
+    el.addEventListener("click",()=>openThread(t.id));
+    el.addEventListener("keydown",e=>{ if(e.key==="Enter")openThread(t.id); });
+    l.appendChild(el);
+  });
+}
+
+async function openThread(tid){
+  threadId=tid;
+  const box=document.getElementById("chat-box");
+  box.innerHTML=`<div class="msg bot"><div class="mc-wrap"><div class="loading-wrap">Loading conversation…</div></div></div>`;
+  document.querySelectorAll(".th-item").forEach(el=>el.classList.toggle("active",el.dataset.tid===tid));
+  try{
+    const r=await api(`/threads/${tid}`); if(!r.ok)throw new Error();
+    box.innerHTML="";
+    const msgs=r.data.messages||[];
+    if(!msgs.length){ box.innerHTML=`<div class="msg bot"><div class="mc-wrap"><div class="mc"><p>No messages in this conversation yet.</p></div></div></div>`; return; }
+    msgs.forEach(m=>{
+      let srcs=[]; if(m.sources){ try{ srcs=JSON.parse(m.sources); }catch(_){ srcs=[]; } }
+      appendMsg(m.role,m.content,srcs,false,m.created_at,m.model||null);
+    });
+  }catch(_){ box.innerHTML=`<div class="msg bot err-msg"><div class="mc-wrap"><div class="mc"><p>Couldn't load this conversation. Try again.</p></div></div></div>`; }
+}
+
+function startRename(id,title){ renameId=id; const i=document.getElementById("rename-in"); i.value=title; openModal("rename-modal"); setTimeout(()=>{ i.focus(); i.select(); },80); }
+async function confirmRename(){
+  const title=document.getElementById("rename-in").value.trim();
+  if(!title||!renameId)return;
+  const r=await api(`/threads/${renameId}/rename`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({title})}).catch(()=>({ok:false}));
+  if(r.ok){ toast("Renamed","success"); closeModal("rename-modal"); loadThreads(); }
+  else toast(humanizeError(r.message,r.code),"error");
+}
+function exportThread(id,title){ const a=document.createElement("a"); a.href=`${API_BASE}/threads/${id}/export`; a.download=`devmentor_${id.slice(0,8)}.md`; a.click(); toast(`Exporting "${title}"…`,"info",2000); }
+async function delThread(id){
+  if(!confirm("Delete this conversation? This can't be undone."))return;
+  const r=await api(`/threads/${id}`,{method:"DELETE"}).catch(()=>({ok:false}));
+  if(r.ok){ toast("Deleted","success"); if(threadId===id)newSession(); else loadThreads(); }
+  else toast("Couldn't delete","error");
+}
+function newSession(){
+  threadId=null; lastUserMessage=null;
+  document.getElementById("chat-box").innerHTML=`<div class="msg bot"><div class="mc-wrap"><div class="mc"><p><strong>New conversation started.</strong></p><p>${chatMode==="rag"?"Ask a question grounded in your uploaded documents.":"Ask me anything — from code to writing, research, or everyday questions."}</p></div></div></div>`;
+  document.querySelectorAll(".th-item").forEach(el=>el.classList.remove("active"));
+  document.getElementById("user-input").focus();
+}
+
+/* ── SEARCH ─────────────────────────────────────────────── */
+function onSearch(v){
+  clearTimeout(searchTimer);
+  const p=document.getElementById("search-panel"),x=document.getElementById("search-x");
+  x.style.display=v?"block":"none";
+  if(!v||v.length<2){ p.style.display="none"; p.innerHTML=""; return; }
+  searchTimer=setTimeout(()=>doSearch(v),320);
+}
+async function doSearch(q){
+  const p=document.getElementById("search-panel"); p.style.display="block";
+  p.innerHTML=`<div style="padding:10px;font-size:12px;color:var(--text-faint)">Searching…</div>`;
+  try{
+    const r=await api(`/search?q=${encodeURIComponent(q)}`); if(!r.ok)throw new Error();
+    const res=r.data.results||[];
+    p.innerHTML=res.length?res.map(x=>`<div class="sr-item" onclick="openThread('${x.thread_id}')" role="option">
+      <div class="sr-thread">${esc(x.thread_title)} <span style="color:var(--text-faint);font-weight:400">· ${x.role}</span></div>
+      <div class="sr-snip">${esc(x.snippet)}</div></div>`).join("")
+      :`<div style="padding:10px;font-size:12px;color:var(--text-faint)">No results.</div>`;
+  }catch(_){ p.innerHTML=`<div style="padding:10px;font-size:12px;color:var(--danger)">Search failed.</div>`; }
+}
+function clearSearch(){
+  document.getElementById("search-in").value="";
+  document.getElementById("search-panel").style.display="none";
+  document.getElementById("search-panel").innerHTML="";
+  document.getElementById("search-x").style.display="none";
+}
+
+/* ── AUTH ───────────────────────────────────────────────── */
+async function doAuth(type){
+  const u=document.getElementById("auth-user").value.trim();
+  const p=document.getElementById("auth-pass").value;
+  const e=document.getElementById("auth-err"); e.style.display="none";
+  if(!u||!p){ e.style.display="block"; e.textContent="Both fields are required."; return; }
+  const btn=document.getElementById("login-btn"); btn.disabled=true; btn.textContent="Please wait…";
+  try{
+    const r=await api(`/auth/${type}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:u,password:p})});
+    if(r.ok&&r.status==="success"){
+      storeAuthTokens(r.data);
+      document.getElementById("auth-overlay").classList.add("hidden");
+      toast(type==="login"?"Welcome back":"Account created","success");
+      await bootIn();
+    } else {
+      e.style.display="block"; e.textContent=humanizeError(r.message,r.code);
+    }
+  }catch(_){ e.style.display="block"; e.textContent="Couldn't reach the server."; }
+  finally{ btn.disabled=false; btn.textContent="Sign in"; }
+}
+window.handleGoogleSignIn=async function(response){
+  const e=document.getElementById("auth-err");
+  try{
+    const r=await api("/auth/google",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:response.credential})});
+    if(r.ok&&r.status==="success"){
+      storeAuthTokens(r.data);
+      document.getElementById("auth-overlay").classList.add("hidden");
+      toast("Signed in with Google","success");
+      await bootIn();
+    } else {
+      e.style.display="block"; e.textContent=humanizeError(r.message,r.code);
+    }
+  }catch(_){ e.style.display="block"; e.textContent="Google sign-in error."; }
+};
+async function doLogout(){
+  if(!confirm("Sign out?"))return;
+  await api("/auth/logout",{method:"POST"}).catch(()=>{});
+  clearAuthTokens();
+  window.location.replace("/");
+}
+
+/* ── FILE HANDLING ──────────────────────────────────────── */
+function handleFile(inp){ if(!inp.files.length)return; attachedFile=inp.files[0]; document.getElementById("file-name-lbl").textContent=attachedFile.name; document.getElementById("file-prev").style.display="flex"; }
+function clearFile(){ attachedFile=null; document.getElementById("file-in").value=""; document.getElementById("file-prev").style.display="none"; }
+function onDragOver(e){ e.preventDefault(); e.currentTarget.classList.add("dragover"); }
+function onDragLeave(e){ e.currentTarget.classList.remove("dragover"); }
+function onDrop(e){
+  e.preventDefault(); e.currentTarget.classList.remove("dragover");
+  const files=e.dataTransfer.files; if(!files.length)return;
+  const dt=new DataTransfer(); for(const f of files)dt.items.add(f);
+  const inp=document.getElementById("rag-in"); inp.files=dt.files; uploadRAG(inp);
+}
+
+/* ── RAG UPLOAD ─────────────────────────────────────────── */
+async function uploadRAG(inp){
+  if(!inp.files.length)return;
+  document.getElementById("rag-count").textContent="indexing…";
+  const fd=new FormData(); for(const f of inp.files)fd.append("file",f);
+  try{
+    const r=await api("/upload_docs",{method:"POST",body:fd});
+    if(r.ok){ const d=r.data; toast(`Uploaded ${d.uploaded} file(s). Indexing…`,"success"); (d.errors||[]).forEach(x=>toast(`Skipped ${x.filename}: ${x.error}`,"warning")); setTimeout(loadRAGStatus,2500); setTimeout(loadRAGStatus,9000); }
+    else toast(humanizeError(r.message,r.code),"error");
+  }catch(_){ toast("Upload failed — check your connection","error"); }
+  inp.value="";
+}
+async function clearRAG(){
+  if(!confirm("Clear all knowledge base files? This can't be undone."))return;
+  const r=await api("/rag/clear",{method:"DELETE"}).catch(()=>({ok:false}));
+  if(r.ok){ toast("Knowledge base cleared","success"); loadRAGStatus(); }
+  else toast("Couldn't clear knowledge base","error");
+}
+
+/* ── MESSAGE RENDERING ──────────────────────────────────── */
+function appendMsg(role, content, sources=[], isError=false, timestamp=null, model=null){
+  const box=document.getElementById("chat-box");
+  const el=document.createElement("div");
+  el.className=`msg ${role==="user"?"user":"bot"}${isError?" err-msg":""}`;
+  const time=timestamp?new Date(timestamp).toLocaleTimeString():new Date().toLocaleTimeString();
+
+  const wrap=document.createElement("div"); wrap.className="mc-wrap";
+
+  if(role==="user"){
+    wrap.textContent=content;
+    el.appendChild(wrap);
+  } else {
+    if(model && !isError){
+      const badge=document.createElement("div"); badge.className="model-badge";
+      badge.innerHTML=`<span class="dot"></span>${esc(model)}`;
+      wrap.appendChild(badge);
+    }
+
+    const mc=document.createElement("div"); mc.className="mc";
+    mc.innerHTML=isError ? `<p>${esc(content)}</p>` : md(content);
+    if(!isError) decorateCodeBlocks(mc);
+    wrap.appendChild(mc);
+
+    if(sources&&sources.length){
+      const sb=document.createElement("div"); sb.className="src-box";
+      sb.innerHTML=`<div class="src-hdr">Sources</div>`;
+      sources.forEach((s,i)=>{
+        const item=document.createElement("div"); item.className="src-item";
+        if(s.url){
+          const u=safeUrl(s.url);
+          item.innerHTML=`<span>${i+1}.</span><a href="${sAttr(u)}" target="_blank" rel="noopener noreferrer">${esc(s.title||"Source")}</a>${s.score!=null?`<span class="src-score">${(s.score*100).toFixed(0)}%</span>`:""}`;
+        } else {
+          item.innerHTML=`<span>${i+1}.</span><span>${esc(s.file||s.title||"Source")}</span>${s.score!=null?`<span class="src-score">${(s.score*100).toFixed(0)}%</span>`:""}`;
+        }
+        sb.appendChild(item);
+      });
+      wrap.appendChild(sb);
+    }
+
+    if(!isError){
+      const foot=document.createElement('div'); foot.className='msg-foot';
+      foot.innerHTML=`<span class="msg-time">${time}</span>
+        <div class="msg-acts">
+          <button class="msg-act" onclick="copyMsg(this)" aria-label="Copy"><i class="fa-solid fa-copy"></i></button>
+          <button class="msg-act" onclick="speakMsg(this)" aria-label="Read aloud"><i class="fa-solid fa-volume-high"></i></button>
+          <button class="msg-act" onclick="regenerate()" aria-label="Regenerate response"><i class="fa-solid fa-arrow-rotate-right"></i></button>
+        </div>`;
+      wrap.appendChild(foot);
+    }
+    el.appendChild(wrap);
+  }
+
+  box.appendChild(el);
+  box.scrollTop=box.scrollHeight;
+  return el;
+}
+
+function decorateCodeBlocks(mc){
+  mc.querySelectorAll("pre").forEach(pre=>{
+    const wrap=document.createElement("div"); wrap.className="cb-wrap";
+    pre.parentNode.insertBefore(wrap,pre); wrap.appendChild(pre);
+    const cb=document.createElement("button"); cb.className="copy-btn"; cb.textContent="Copy";
+    cb.setAttribute("aria-label","Copy code");
+    cb.onclick=()=>navigator.clipboard.writeText(pre.innerText).then(()=>{ cb.textContent="Copied"; setTimeout(()=>cb.textContent="Copy",1400); });
+    wrap.appendChild(cb);
+  });
+  setTimeout(()=>mc.querySelectorAll("pre code").forEach(b=>hljs.highlightElement(b)),20);
+}
+
+function copyMsg(btn){ const mc=btn.closest(".msg").querySelector(".mc"); navigator.clipboard.writeText(mc?mc.innerText:btn.closest(".msg").innerText).then(()=>toast("Copied","success",1400)); }
+function speakMsg(btn){ const mc=btn.closest(".msg").querySelector(".mc"); speak(mc?mc.innerText:btn.closest(".msg").innerText); }
+
+function regenerate(){
+  if(busy || !lastUserMessage) return;
+  const box=document.getElementById("chat-box");
+  const bots=box.querySelectorAll(".msg.bot");
+  if(bots.length) bots[bots.length-1].remove();
+  const mode = lastRequestMode || chatMode;
+  dispatchMessage(lastUserMessage, mode, true);
+}
+
+function showThinking(label){
+  document.getElementById("thinking-rule").classList.add("on");
+  const l=document.getElementById("thinking-label");
+  l.textContent=label||"Thinking through this…";
+  l.classList.add("on");
+}
+function hideThinking(){
+  document.getElementById("thinking-rule").classList.remove("on");
+  document.getElementById("thinking-label").classList.remove("on");
+}
+
+function onInputKey(e){
+  if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); sendMessage(); }
+  if(e.key==="Escape"){ clearFile(); document.getElementById("user-input").blur(); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   STREAMING
+   ══════════════════════════════════════════════════════════ */
+function initWebSocket(){
+  try{
+    socket = io(window.location.origin, {
+      transports:['websocket','polling'],
+      reconnection:true, reconnectionAttempts:5,
+      auth: accessToken ? { token: accessToken } : {},
+    });
+
+    socket.on('connect', ()=>{ socketReady=true; });
+    socket.on('disconnect', ()=>{ socketReady=false; });
+
+    socket.on('chat_token', (data)=>{
+      if(data.stream_id !== activeStreamId) return;
+      streamingTextBuffer += data.token;
+      scheduleStreamRender();
+    });
+
+    socket.on('chat_done', (data)=>{
+      if(data.stream_id !== activeStreamId) return;
+      finishStreaming(data);
+    });
+
+    socket.on('chat_stopped', (data)=>{
+      if(data.stream_id !== activeStreamId) return;
+      finishStoppedStream(data);
+    });
+
+    socket.on('chat_error', (data)=>{
+      if(data.stream_id !== activeStreamId) return;
+      failStreaming(data);
+    });
+  }catch(e){
+    console.warn('WebSocket unavailable, falling back to HTTP:', e);
+    socketReady=false;
+  }
+}
+
+let streamRenderQueued=false;
+function scheduleStreamRender(){
+  if(streamRenderQueued) return;
+  streamRenderQueued=true;
+  requestAnimationFrame(()=>{
+    streamRenderQueued=false;
+    if(streamingMcEl){
+      streamingMcEl.innerHTML = md(streamingTextBuffer);
+      const box=document.getElementById("chat-box");
+      box.scrollTop = box.scrollHeight;
+    }
+  });
+}
+
+function beginStreamingMessage(model){
+  const box=document.getElementById('chat-box');
+  streamingMsgEl=document.createElement('div');
+  streamingMsgEl.className='msg bot';
+  const wrap=document.createElement('div'); wrap.className='mc-wrap';
+  if(model){
+    const badge=document.createElement("div"); badge.className="model-badge";
+    badge.innerHTML=`<span class="dot"></span>${esc(model)}`;
+    wrap.appendChild(badge);
+  }
+  streamingMcEl=document.createElement('div'); streamingMcEl.className='mc';
+  streamingMcEl.textContent='';
+  wrap.appendChild(streamingMcEl);
+  streamingMsgEl.appendChild(wrap);
+  box.appendChild(streamingMsgEl);
+  box.scrollTop=box.scrollHeight;
+}
+
+function finishStreaming(data){
+  decorateCodeBlocks(streamingMcEl);
+  const wrap=streamingMsgEl.querySelector('.mc-wrap');
+  const foot=document.createElement('div'); foot.className='msg-foot';
+  foot.innerHTML=`<span class="msg-time">${new Date().toLocaleTimeString()}</span>
+    <div class="msg-acts">
+      <button class="msg-act" onclick="copyMsg(this)" aria-label="Copy"><i class="fa-solid fa-copy"></i></button>
+      <button class="msg-act" onclick="speakMsg(this)" aria-label="Read aloud"><i class="fa-solid fa-volume-high"></i></button>
+      <button class="msg-act" onclick="regenerate()" aria-label="Regenerate response"><i class="fa-solid fa-arrow-rotate-right"></i></button>
+    </div>`;
+  wrap.appendChild(foot);
+  speak(streamingTextBuffer);
+
+  threadId = data.thread_id || threadId;
+  if(data.is_new_thread){ loadThreads(); loadStats(); }
+
+  resetStreamState();
+  hideThinking();
+  setBusy(false);
+}
+
+function finishStoppedStream(data){
+  if(streamingMcEl){
+    streamingMcEl.innerHTML = md(streamingTextBuffer || data.partial_response || "");
+    decorateCodeBlocks(streamingMcEl);
+  }
+  if(streamingMsgEl){
+    const wrap=streamingMsgEl.querySelector('.mc-wrap');
+    const note=document.createElement('div');
+    note.style.cssText="margin-top:8px;font-size:11px;color:var(--text-faint);font-style:italic;font-family:var(--font-serif)";
+    note.textContent="Stopped";
+    wrap.appendChild(note);
+    const foot=document.createElement('div'); foot.className='msg-foot';
+    foot.innerHTML=`<span class="msg-time">${new Date().toLocaleTimeString()}</span>
+      <div class="msg-acts">
+        <button class="msg-act" onclick="copyMsg(this)" aria-label="Copy"><i class="fa-solid fa-copy"></i></button>
+        <button class="msg-act" onclick="speakMsg(this)" aria-label="Read aloud"><i class="fa-solid fa-volume-high"></i></button>
+        <button class="msg-act" onclick="regenerate()" aria-label="Regenerate response"><i class="fa-solid fa-arrow-rotate-right"></i></button>
+      </div>`;
+    wrap.appendChild(foot);
+  }
+
+  threadId = data.thread_id || threadId;
+  if(data.is_new_thread){ loadThreads(); loadStats(); }
+
+  resetStreamState();
+  hideThinking();
+  setBusy(false);
+}
+
+function failStreaming(data){
+  if(streamingMsgEl){
+    streamingMsgEl.classList.add('err-msg');
+    streamingMcEl.innerHTML = `<p>${esc(humanizeError(data.message, data.code))}</p>`;
+  }
+  toast(humanizeError(data.message, data.code), "error");
+  resetStreamState();
+  hideThinking();
+  setBusy(false);
+}
+
+function resetStreamState(){
+  activeStreamId=null; streamingMsgEl=null; streamingMcEl=null; streamingTextBuffer="";
+}
+
+function setBusy(v){
+  busy=v;
+  document.getElementById("send-btn").disabled=v;
+  document.getElementById("send-btn").style.display = v ? "none" : "flex";
+  document.getElementById("stop-btn").style.display = v ? "flex" : "none";
+  const inp=document.getElementById("user-input");
+  inp.disabled=v;
+  if(!v) inp.focus();
+}
+
+async function stopGeneration(){
+  if(!activeStreamId) return;
+  try{
+    await api(`/chat/stream/${activeStreamId}/stop`, { method:"POST" });
+  }catch(_){}
+}
+
+/* ── SEND MESSAGE ───────────────────────────────────────── */
+function sendMessage(){
+  if(busy) return;
+  const inp=document.getElementById('user-input');
+  const msg=inp.value.trim();
+  if(!msg && !attachedFile) return;
+  dispatchMessage(msg, chatMode, false);
+}
+
+async function dispatchMessage(msg, mode, isRegenerate){
+  const inp=document.getElementById('user-input');
+  if(!msg && !attachedFile) return;
+
+  lastUserMessage = msg;
+  lastRequestMode = mode;
+
+  if(attachedFile || mode==="rag" || useGrounding){
+    await sendMessageHTTP(msg, mode, isRegenerate);
+    return;
+  }
+
+  if(socketReady && socket && socket.connected){
+    setBusy(true);
+    if(!isRegenerate){ appendMsg('user', msg); }
+    inp.value=''; autoResize(inp);
+    showThinking("Starting up…");
+
+    try{
+      const r = await api('/chat/stream', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ message: msg, thread_id: threadId }),
+      });
+      if(!r.ok || !r.data || !r.data.stream_id){
+        hideThinking(); setBusy(false);
+        appendMsg('bot', humanizeError(r.message, r.code), [], true);
+        return;
+      }
+      activeStreamId = r.data.stream_id;
+      threadId = r.data.thread_id || threadId;
+      socket.emit('join', { room: activeStreamId });
+      beginStreamingMessage(r.data.model || null);
+      hideThinking();
+    }catch(_){
+      hideThinking(); setBusy(false);
+      appendMsg('bot', "Connection error. Please try again.", [], true);
+    }
+  } else {
+    await sendMessageHTTP(msg, mode, isRegenerate);
+  }
+}
+
+async function sendMessageHTTP(msg, mode, isRegenerate){
+  if(busy) return;
+  const inp=document.getElementById('user-input');
+
+  setBusy(true);
+  if(!isRegenerate){ appendMsg('user', msg || `[Attached: ${attachedFile?.name}]`); }
+  inp.value=""; autoResize(inp);
+  showThinking(mode==="rag" ? "Searching your documents…" : "Thinking through this…");
+
+  const fd=new FormData();
+  fd.append("message", msg);
+  if(threadId) fd.append("thread_id", threadId);
+  if(attachedFile) fd.append("file", attachedFile);
+  fd.append("use_grounding", useGrounding ? "true" : "false");
+
+  try{
+    const path = mode==="rag" ? "/chat-rag" : "/chat";
+    const headers = accessToken ? { "Authorization": `Bearer ${accessToken}` } : {};
+    const r = await fetch(API_BASE + path, { method:"POST", body:fd, headers });
+    hideThinking();
+    const j = await r.json();
+    const d = j.data || {};
+
+    if(j.status==="success" && d.response){
+      threadId = d.thread_id || threadId;
+      appendMsg("bot", d.response, d.sources || [], false, null, d.model || null);
+      speak(d.response);
+      if(d.is_new_thread){ await loadThreads(); await loadStats(); }
+    } else {
+      appendMsg("bot", humanizeError(j.message, j.code), [], true);
+      toast(humanizeError(j.message, j.code), "error");
+    }
+  }catch(_){
+    hideThinking();
+    appendMsg("bot", "Connection error. The server may be unreachable.", [], true);
+    toast("Connection failed", "error");
+  }finally{
+    setBusy(false);
+    clearFile();
+  }
+}
+
+/* ── GOOGLE INIT ────────────────────────────────────────── */
+function initGoogle(){
+  if(typeof google==="undefined"||!google.accounts)return;
+  try{
+    google.accounts.id.initialize({client_id:GOOGLE_CLIENT_ID,callback:handleGoogleSignIn,auto_select:false,cancel_on_tap_outside:false});
+    const b=document.querySelector(".g_id_signin");
+    if(b)google.accounts.id.renderButton(b,{theme:"outline",size:"large",text:"signin_with",shape:"rectangular",logo_alignment:"left",width:328});
+  }catch(e){console.warn("Google init:",e);}
+}
+
+/* ── BOOT ───────────────────────────────────────────────── */
+async function bootIn(){
+  await Promise.all([loadProfile(), loadThreads(), loadRAGStatus(), loadStats()]);
+  initWebSocket();
+}
+
+/* ── KEYBOARD SHORTCUTS ─────────────────────────────────── */
+document.addEventListener("keydown",e=>{
+  const cm=e.ctrlKey||e.metaKey;
+  if(cm&&(e.key==="/"||e.key==="k")){ e.preventDefault(); document.getElementById("search-in").focus(); }
+  if(cm&&e.shiftKey&&e.key==="N"){ e.preventDefault(); newSession(); }
+  if(cm&&e.key==="b"){ e.preventDefault(); toggleSB(); }
+});
+
+/* ── INIT ───────────────────────────────────────────────── */
+window.addEventListener("load",async()=>{
+  setTheme(localStorage.getItem("dm-theme")||"dark");
+  if(localStorage.getItem("dm-muted")==="0"){ isMuted=true; toggleMute(); }
+
+  const overlay=document.getElementById("auth-overlay");
+  const isLoggedIn = (overlay.style.display==="none") && !!accessToken;
+
+  if(isLoggedIn){
+    await bootIn();
+    setInterval(loadRAGStatus,30_000);
+    setInterval(loadStats,60_000);
+  } else if(!accessToken){
+    overlay.classList.remove("hidden");
+    overlay.style.display="flex";
+  }
+
+  if(typeof google!=="undefined")initGoogle();
+  else document.querySelector('script[src*="accounts.google.com"]')?.addEventListener("load",initGoogle);
+  window.speechSynthesis?.getVoices();
+
+  document.getElementById("user-input").focus();
+  document.getElementById("auth-pass").addEventListener("keydown",e=>{ if(e.key==="Enter")doAuth("login"); });
+  document.getElementById("auth-user").addEventListener("keydown",e=>{ if(e.key==="Enter")document.getElementById("auth-pass").focus(); });
+});
+</script>
+</body>
+</html>

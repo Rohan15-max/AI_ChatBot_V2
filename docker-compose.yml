@@ -1,0 +1,107 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --requirepass _NvoaIOzChSfKh6cCHt3EroIBQgTCsM7iwysaWfUiHc
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # NOTE: RabbitMQ removed. Nothing in this codebase connects to it — Celery
+  # is configured in config.py / celery_app.py to use Redis as both broker
+  # and result backend (celery_broker_url defaults to redis://localhost:6379/1).
+  # The RabbitMQ container was running unused, consuming RAM/CPU for no
+  # benefit. If you later want RabbitMQ as the Celery broker instead of
+  # Redis, that's a config.py + celery_app.py change first, then re-add
+  # this service.
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/6333 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  app:
+    build: .
+    ports:
+      # FIX: the Dockerfile's gunicorn binds to 0.0.0.0:5000 (see EXPOSE 5000
+      # and the CMD's --bind 0.0.0.0:5000). The previous "8000:8000" mapping
+      # forwarded host port 8000 to container port 8000, where nothing is
+      # listening — every request would connect-refuse. Host port kept at
+      # 8000 for convenience (so localhost:8000 still works from habit/docs),
+      # but now correctly forwards to the container's real port, 5000.
+      - "8000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    env_file:
+      - .env
+    volumes:
+      - ./knowledge_base:/app/knowledge_base
+      - ./rag_storage:/app/rag_storage
+      - ./logs:/app/logs
+      # NOTE: the Docker socket mount that was here ("Required for agent
+      # sandbox") has been removed. No code in agent_tools.py or
+      # agent_loop.py currently spins up sandboxed containers — the agent's
+      # tools are calculator/web_search/wikipedia/weather/etc., none of
+      # which touch Docker. Mounting /var/run/docker.sock grants the app
+      # container root-equivalent control over the host's Docker daemon,
+      # which is a serious privilege escalation risk for zero current
+      # benefit. If a real code-execution sandbox tool is added later that
+      # genuinely needs to launch containers, re-add this deliberately at
+      # that point — don't carry it forward unused.
+    restart: unless-stopped
+
+  celery-worker:
+    build: .
+    command: celery -A celery_app.celery_app worker --loglevel=info --concurrency=2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    volumes:
+      - ./knowledge_base:/app/knowledge_base
+      - ./rag_storage:/app/rag_storage
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:

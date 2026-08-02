@@ -1,0 +1,416 @@
+# ============================================================
+# PRODUCTION — complete, security-hardened compose file
+# Run: docker compose -f docker-compose.prod.yml up -d
+# ============================================================
+
+services:
+
+  # ── PostgreSQL ─────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: ai_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
+        reservations:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    networks:
+      - backend
+
+  # ── Redis ───────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: ai_redis
+    restart: always
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD}
+      --loglevel warning
+    volumes:
+      - redis_data:/data
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 600M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - backend
+
+  # ── Qdrant Vector DB ────────────────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: ai_qdrant
+    restart: always
+    volumes:
+      - qdrant_data:/qdrant/storage
+    expose:
+      - "6333"
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+    healthcheck:
+      disable: true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
+        reservations:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - backend
+
+  # ── Flask AI App ────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: ai_app
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=production
+      - DEBUG=false
+      # FIX: removed DATABASE_URL — config.py's Settings class has no field
+      # named database_url and never reads it; pydantic-settings only binds
+      # env vars to declared field names (case-insensitive), so this var was
+      # silently ignored every time and the app fell back to the *default*
+      # postgres_host ("localhost"), which doesn't resolve to anything
+      # inside this container's network — only the "postgres" service does.
+      # Replaced with the individual fields config.py actually declares
+      # (postgres_host / postgres_user / postgres_password / postgres_db),
+      # which pydantic-settings picks up automatically as POSTGRES_HOST etc.
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/2
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+    ports:
+      - "127.0.0.1:5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    # Bypass entrypoint.sh and go straight to gunicorn.
+    #
+    # WARNING - VERIFY BEFORE RELYING ON THIS: entrypoint.sh has not been
+    # reviewed in this pass. If it runs database migrations (e.g.
+    # `alembic upgrade head`) before starting the app -- which is the
+    # standard reason an entrypoint script exists alongside a Dockerfile
+    # CMD -- then bypassing it here means PRODUCTION NEVER RUNS MIGRATIONS
+    # automatically. The dev docker-compose.yml does NOT bypass the
+    # entrypoint, so dev and prod could end up on different schema versions
+    # without anyone running `make migrate` by hand in prod. Confirm what
+    # entrypoint.sh actually does, then either restore it here or wire an
+    # explicit migration step into your deploy process.
+    entrypoint: ["gunicorn"]
+    command:
+      # FIX: switched from gevent to gthread, matching the same reasoning
+      # as the Dockerfile fix -- websocket_handler.py uses
+      # async_mode="threading", and gevent's monkey-patching does not
+      # reliably coexist with that or with app.py's manually-managed
+      # native background thread running its own asyncio loop.
+      - "--worker-class=gthread"
+      - "-w=1"
+      - "--threads=8"
+      - "--bind=0.0.0.0:5000"
+      - "--timeout=120"
+      - "--keep-alive=5"
+      - "--log-level=warning"
+      - "--access-logfile=-"
+      - "--error-logfile=-"
+      - "app:app"
+    volumes:
+      - app_uploads:/app/uploads
+      - app_logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1536M
+        reservations:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    networks:
+      - backend
+
+  # ── Celery Worker ───────────────────────────────────────────
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: ai_celery_worker
+    restart: always
+    entrypoint: ["celery"]
+    command:
+      - "-A=celery_app"
+      - "worker"
+      - "--loglevel=warning"
+      - "--concurrency=4"
+      - "--max-tasks-per-child=100"
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=production
+      # Same fix as the app service above -- individual Postgres fields
+      # instead of the DATABASE_URL var that config.py never reads.
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/2
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - app_uploads:/app/uploads
+      - app_logs:/app/logs
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2048M
+        reservations:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    networks:
+      - backend
+
+  # ── Celery Beat ─────────────────────────────────────────────
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: ai_celery_beat
+    restart: always
+    entrypoint: ["celery"]
+    command:
+      - "-A=celery_app"
+      - "beat"
+      - "--loglevel=warning"
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=production
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/2
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - backend
+
+  # ── Nginx Reverse Proxy ─────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: ai_nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - app_uploads:/app/uploads:ro
+    depends_on:
+      - app
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "10"
+    networks:
+      - backend
+
+  # ── Blackbox Exporter ───────────────────────────────────────
+  # NEW: required by prometheus.yml's openai/anthropic/gemini probe jobs,
+  # which back alert_rules.yml's LLMProviderDown / GeminiProviderDown /
+  # AnthropicProviderDown alerts. Without this service running and
+  # reachable at blackbox_exporter:9115, those three scrape jobs fail
+  # silently and the alerts can never fire — see the detailed comment in
+  # prometheus.yml for what's actually being probed and its honest
+  # limitations (no Gemini-specific public status endpoint exists).
+  blackbox_exporter:
+    image: prom/blackbox-exporter:latest
+    container_name: ai_blackbox_exporter
+    restart: always
+    expose:
+      - "9115"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - backend
+
+  # ── Prometheus ──────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ai_prometheus
+    restart: always
+    depends_on:
+      - blackbox_exporter
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    expose:
+      - "9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - backend
+
+  # ── Grafana ─────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ai_grafana
+    restart: always
+    expose:
+      - "3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana/
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  prometheus_data:
+  grafana_data:
+  app_uploads:
+  app_logs:
+
+networks:
+  backend:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
